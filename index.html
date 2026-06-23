@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>NEON FRUIT NINJA — Hand Tracking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Discord brand chord */
+    --blurple:#5865f2;
+    --green:#35ed7e;
+    --magenta:#ec48bd;
+    --link:#00b0f4;
+    --violet:#7b5bff;
+    /* surfaces */
+    --canvas:#0a0d3a;
+    --indigo:#1e2353;
+    --onyx:#23272a;
+    --ink:#ffffff;
+    --ink-dark:#000000;
+    /* shape */
+    --r-sm:12px; --r-md:14px; --r-lg:16px; --r-xl:40px; --r-pill:50px;
+    --shadow-soft:0 3px 68px rgba(69,42,124,0.45);
+  }
+  *{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{
+    width:100%; height:100%;
+    background:var(--canvas);
+    overflow:hidden;
+    font-family:"Inter","Segoe UI",sans-serif;
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  #wrap{
+    position:fixed; inset:0;
+    display:flex; align-items:center; justify-content:center;
+  }
+  canvas{ display:block; }
+
+  /* hidden source video (used only as a texture source) */
+  #cam{
+    position:absolute; width:10px; height:10px;
+    opacity:0; pointer-events:none; top:-9999px;
+  }
+
+  /* full-screen red blast flash when a bomb is sliced */
+  #boom{
+    position:fixed; inset:0; z-index:18; pointer-events:none; opacity:0;
+    background:radial-gradient(circle at 50% 50%, rgba(255,180,60,0.85), rgba(255,40,20,0.6) 40%, rgba(120,0,0,0.2) 75%, transparent);
+  }
+
+  /* ---------- HUD ---------- */
+  #hud{
+    position:fixed; top:0; left:0; right:0;
+    display:flex; justify-content:space-between; align-items:flex-start;
+    padding:22px 28px;
+    pointer-events:none;
+    z-index:5;
+  }
+  .panel{
+    position:relative;
+    background:rgba(30,35,83,0.78);          /* surface-indigo, slightly translucent */
+    border:1px solid rgba(255,255,255,0.08);
+    border-radius:var(--r-lg);
+    padding:14px 22px;
+    backdrop-filter:blur(12px);
+    box-shadow:var(--shadow-soft);
+  }
+  #scoreBox{ text-align:left; min-width:128px; }
+  .label{
+    font-size:11px; letter-spacing:2.5px; text-transform:uppercase;
+    color:rgba(255,255,255,0.55); font-weight:700;
+  }
+  #score{
+    font-family:"Hanken Grotesk",sans-serif;
+    font-size:44px; font-weight:800; line-height:1; margin-top:4px;
+    color:#fff; letter-spacing:-1px;
+    transition:transform .12s cubic-bezier(.2,1.6,.4,1);
+  }
+  #hi{
+    font-family:"Hanken Grotesk",sans-serif;
+    font-size:13px; font-weight:700; color:var(--green);
+    margin-top:6px; letter-spacing:1px;
+  }
+  /* in-game pause button (HUD is pointer-events:none, so re-enable on the button) */
+  #pauseBtn{
+    pointer-events:auto; cursor:pointer; align-self:center;
+    font-family:"Inter",sans-serif; font-size:14px; letter-spacing:2px; color:#fff;
+    width:52px; height:52px; border-radius:50%;
+    background:rgba(30,35,83,0.78); border:1px solid rgba(255,255,255,0.12);
+    backdrop-filter:blur(12px); box-shadow:var(--shadow-soft);
+    transition:transform .14s cubic-bezier(.2,1.6,.4,1), background .2s;
+  }
+  #pauseBtn:hover{ transform:scale(1.08); background:rgba(88,101,242,0.55); }
+  #pauseBtn:active{ transform:scale(.96); }
+
+  #livesWrap{ text-align:right; }
+  #livesWrap .label{ display:block; margin-bottom:8px; }
+  #lives{ display:flex; gap:10px; align-items:center; justify-content:flex-end; }
+  .life{
+    width:30px; height:30px;
+    transition:transform .25s cubic-bezier(.2,1.6,.4,1), opacity .35s, filter .35s;
+  }
+  .life.lost{ opacity:0.18; transform:scale(0.6); filter:grayscale(1); }
+
+  /* ---------- Overlays ---------- */
+  /* deep-indigo canvas washed by an animated Blurple→violet→magenta mesh */
+  .overlay{
+    position:fixed; inset:0; z-index:20;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:center;
+    text-align:center;
+    background:
+      radial-gradient(42% 55% at 18% 25%, rgba(88,101,242,0.65), transparent 60%),
+      radial-gradient(45% 55% at 82% 22%, rgba(236,72,189,0.55), transparent 60%),
+      radial-gradient(55% 60% at 55% 88%, rgba(123,91,255,0.55), transparent 62%),
+      var(--canvas);
+    background-size:180% 180%;
+    animation:mesh 16s ease-in-out infinite, fadeIn .35s ease both;
+  }
+  @keyframes mesh{
+    0%{ background-position:0% 0%; }
+    50%{ background-position:100% 100%; }
+    100%{ background-position:0% 0%; }
+  }
+  @keyframes fadeIn{ from{opacity:0;} to{opacity:1;} }
+  .hidden{ display:none !important; }
+
+  /* raised-indigo feature card (rounded.xl) — depth from colour + radius, soft violet glow */
+  .card{
+    position:relative;
+    padding:52px 60px 48px;
+    border-radius:var(--r-xl);
+    background:var(--indigo);
+    box-shadow:var(--shadow-soft);
+    animation:rise .5s cubic-bezier(.2,.9,.3,1.2) both;
+    max-width:92vw;
+  }
+  @keyframes rise{ from{opacity:0; transform:translateY(26px) scale(.97);} to{opacity:1; transform:none;} }
+
+  /* loud all-caps display headline */
+  .title{
+    font-family:"Hanken Grotesk",sans-serif;
+    font-size:72px; font-weight:900; letter-spacing:-1px; line-height:0.98;
+    text-transform:uppercase; color:#fff;
+  }
+  .title .accent{ color:var(--magenta); }
+  .title.small{ font-size:50px; }
+  .sub{
+    font-size:18px; font-weight:500; color:rgba(255,255,255,0.72);
+    max-width:440px; line-height:1.55; margin:20px auto 28px;
+  }
+  .sub b{ color:#fff; font-weight:700; }
+
+  /* fruit emoji chips on the start screen (magenta-tinted badges) */
+  .fruitline{ display:flex; gap:12px; justify-content:center; margin:6px 0 30px; flex-wrap:wrap; }
+  .chip{
+    font-size:14px; font-weight:600; letter-spacing:.3px;
+    padding:8px 16px; border-radius:var(--r-pill);
+    background:rgba(236,72,189,0.16); border:1px solid rgba(236,72,189,0.4);
+    color:#fff; display:flex; align-items:center; gap:8px;
+  }
+  .chip .em{ font-size:18px; line-height:1; }
+  .chip-bomb{
+    background:rgba(255,40,40,0.16); border-color:rgba(255,80,80,0.55); color:#ffd9d9;
+  }
+
+  /* game-over death reason line */
+  #overReason{
+    font-size:16px; font-weight:600; color:rgba(255,255,255,0.75);
+    margin-top:6px; letter-spacing:.3px;
+  }
+
+  .btnrow{ display:flex; gap:16px; flex-wrap:wrap; justify-content:center; }
+  /* base button */
+  button.btn{
+    pointer-events:auto; cursor:pointer; position:relative; overflow:hidden;
+    font-family:"Hanken Grotesk",sans-serif;
+    font-size:18px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+    border:none; border-radius:var(--r-sm);
+    padding:16px 34px; min-height:52px;
+    transition:transform .14s cubic-bezier(.2,1.6,.4,1), box-shadow .25s, filter .2s;
+  }
+  button.btn::after{ /* shimmer sweep */
+    content:""; position:absolute; top:0; left:-120%; width:55%; height:100%;
+    background:linear-gradient(100deg,transparent,rgba(255,255,255,.4),transparent);
+    transform:skewX(-20deg); transition:left .55s;
+  }
+  button.btn:hover::after{ left:150%; }
+  button.btn:hover{ transform:translateY(-2px) scale(1.04); filter:brightness(1.08); }
+  button.btn:active{ transform:translateY(0) scale(.99); }
+  /* electric-green = highest-intent CTA, black label */
+  button.btn-green{
+    background:var(--green); color:var(--ink-dark);
+    box-shadow:0 8px 30px rgba(53,237,126,0.4);
+  }
+  button.btn-green:hover{ box-shadow:0 10px 38px rgba(53,237,126,0.6); }
+  /* blurple = everyday action */
+  button.btn-primary{
+    background:var(--blurple); color:#fff;
+    box-shadow:0 8px 30px rgba(88,101,242,0.45);
+  }
+  button.btn-primary:hover{ box-shadow:0 10px 38px rgba(88,101,242,0.65); }
+  /* ghost = translucent indigo on dark */
+  button.btn-ghost{
+    background:rgba(255,255,255,0.08); color:#fff;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,0.16);
+  }
+  button.btn-ghost:hover{ background:rgba(255,255,255,0.14); }
+
+  /* game-over stat readout */
+  .stats{ display:flex; gap:18px; justify-content:center; margin:24px 0 30px; }
+  .stat{
+    min-width:128px; padding:18px 24px; border-radius:var(--r-lg);
+    background:rgba(10,13,58,0.55); border:1px solid rgba(255,255,255,0.07);
+  }
+  .stat .v{
+    font-family:"Hanken Grotesk",sans-serif; font-weight:900; font-size:46px;
+    line-height:1; letter-spacing:-1px;
+  }
+  .stat .k{ font-size:11px; font-weight:700; letter-spacing:2.5px; text-transform:uppercase;
+    color:rgba(255,255,255,.5); margin-top:10px; }
+  #finalScore .v{ color:#fff; }
+  #hiFinal  .v{ color:var(--green); }
+  #newHi{
+    font-family:"Hanken Grotesk",sans-serif; font-weight:800;
+    font-size:15px; color:var(--magenta);
+    letter-spacing:3px; margin-bottom:16px; display:none; text-transform:uppercase;
+    animation:blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink{ 50%{ opacity:.4; } }
+
+  #status{
+    position:fixed; bottom:16px; left:0; right:0; text-align:center;
+    font-size:12px; letter-spacing:1.5px; color:rgba(255,255,255,0.45);
+    z-index:6; pointer-events:none; font-weight:600;
+  }
+  .pulse{ animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{opacity:.5;} 50%{opacity:.9;} }
+</style>
+</head>
+<body>
+<div id="wrap"></div>
+<div id="boom"></div>
+
+<!-- hidden camera source -->
+<video id="cam" autoplay playsinline muted></video>
+
+<!-- HUD -->
+<div id="hud" class="hidden">
+  <div id="scoreBox" class="panel">
+    <div class="label">Score</div>
+    <div id="score">0</div>
+    <div id="hi">HI 0</div>
+  </div>
+  <button id="pauseBtn" title="Pause (P)">❚❚</button>
+  <div id="livesWrap" class="panel">
+    <span class="label">Lives</span>
+    <div id="lives"></div>
+  </div>
+</div>
+
+<!-- START overlay -->
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <div class="title">FRUIT<br/><span class="accent">NINJA</span></div>
+    <div class="sub">
+      Slice the fruit with your <b>index finger</b> in front of the camera.<br/>
+      Miss <b>three</b> and it's game over. Past <b>30 points</b>, dodge the <b>💣 bombs</b> — slice one and you're done.
+    </div>
+    <div class="fruitline">
+      <span class="chip"><span class="em">🍊</span>Orange</span>
+      <span class="chip"><span class="em">🍉</span>Watermelon</span>
+      <span class="chip"><span class="em">🍌</span>Banana</span>
+      <span class="chip"><span class="em">🍇</span>Grape</span>
+      <span class="chip chip-bomb"><span class="em">💣</span>Avoid!</span>
+    </div>
+    <div class="btnrow">
+      <button class="btn btn-green" id="startBtn">Start Game</button>
+    </div>
+    <div style="margin-top:18px;font-size:13px;color:rgba(255,255,255,.5);letter-spacing:.5px;" id="loadNote">Allow camera access when prompted</div>
+  </div>
+</div>
+
+<!-- PAUSE overlay -->
+<div id="pauseScreen" class="overlay hidden">
+  <div class="card">
+    <div class="title small">PAUSED</div>
+    <div class="sub" style="margin-bottom:24px;">Take a breath. The fruit will wait.</div>
+    <div class="btnrow">
+      <button class="btn btn-green" id="resumeBtn">Resume</button>
+      <button class="btn btn-ghost" id="restartFromPause">Restart</button>
+    </div>
+  </div>
+</div>
+
+<!-- GAME OVER overlay -->
+<div id="overScreen" class="overlay hidden">
+  <div class="card">
+    <div class="title small">GAME OVER</div>
+    <div id="overReason">Out of lives</div>
+    <div id="newHi">★ New High Score ★</div>
+    <div class="stats">
+      <div class="stat" id="finalScore"><div class="v">0</div><div class="k">Score</div></div>
+      <div class="stat" id="hiFinal"><div class="v">0</div><div class="k">Best</div></div>
+    </div>
+    <div class="btnrow">
+      <button class="btn btn-green" id="playAgainBtn">Play Again</button>
+    </div>
+  </div>
+</div>
+
+<div id="status" class="pulse">initializing…</div>
+
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+
+<script>
+/* =========================================================================
+   NEON FRUIT NINJA  —  MediaPipe Tasks HandLandmarker (GPU) + p5.js
+   Single-file computer-vision game.
+   ========================================================================= */
+
+// ---------- global state ----------
+const State = { START:'start', PLAYING:'playing', PAUSED:'paused', OVER:'over' };
+let gameState = State.START;
+
+let score = 0;
+let lives = 3;
+const MAX_LIVES = 3;
+let highScore = Number(localStorage.getItem('neonFruitHi') || 0);
+
+let fruits = [];
+let particles = [];
+let splashes = [];
+let popups = [];          // floating "+N" score text
+let blades = [];          // trail points {x,y,t}
+let lastSpawn = 0;
+let spawnInterval = 1100; // ms, ramps down with score
+let gameStartTime = 0;
+
+const GRAVITY = 0.16;     // gentle fall so fruit are catchable on the way down
+const MAX_ACTIVE = 3;     // never let more than this many fruit fall at once
+
+// fingertip in canvas coords (mirrored)
+let tip = { x: -1, y: -1, active:false, px:-1, py:-1 };
+
+// dimensions
+let W = window.innerWidth, H = window.innerHeight;
+
+// ---------- DOM ----------
+const $ = id => document.getElementById(id);
+const els = {};
+['hud','score','hi','lives','status','startScreen','pauseScreen','overScreen',
+ 'finalScore','hiFinal','newHi','loadNote','overReason'].forEach(id => els[id]=$(id));
+
+// ---------- fruit definitions ----------
+// Rendered as full-colour emoji glyphs for realism; whole + half emoji slices.
+// c/accent/splash drive the juice particles & splat colours.
+const FRUITS = [
+  { name:'orange',     emoji:'🍊', half:'🍊', r:46, c:[255,150,30],  accent:[255,200,90],  splash:[255,165,50],  points:1 },
+  { name:'tomato',     emoji:'🍅', half:'🍅', r:44, c:[230,40,50],   accent:[255,110,110], splash:[235,55,60],   points:1 },
+  { name:'watermelon', emoji:'🍉', half:'🍉', r:60, c:[40,180,80],   accent:[235,60,95],   splash:[235,60,90],   points:2 },
+  { name:'banana',     emoji:'🍌', half:'🍌', r:52, c:[255,225,60],  accent:[255,245,150], splash:[255,235,120], points:1 },
+  { name:'grape',      emoji:'🍇', half:'🍇', r:44, c:[150,70,220],  accent:[200,140,255], splash:[170,90,230],  points:2 },
+  { name:'strawberry', emoji:'🍓', half:'🍓', r:42, c:[230,40,80],   accent:[255,120,150], splash:[235,55,95],   points:1 },
+  { name:'lemon',      emoji:'🍋', half:'🍋', r:44, c:[245,215,30],  accent:[255,240,120], splash:[245,220,70],  points:1 },
+];
+const EMOJI_FONT = '"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+
+// ---------- bombs ----------
+// Appear once you pass BOMB_SCORE. Slicing one = instant game over. Letting it fall
+// off-screen is safe (no life lost) — you're meant to AVOID them.
+const BOMB = { name:'bomb', emoji:'💣', r:46, c:[40,40,46], accent:[120,120,130], splash:[255,120,30], points:0, isBomb:true };
+const BOMB_SCORE  = 30;     // bombs start appearing after this score
+const BOMB_CHANCE = 0.28;   // chance a spawn is a bomb (once unlocked)
+
+// ============================================================
+//  p5 SKETCH
+// ============================================================
+window.addEventListener('error', e=>{
+  // Ignore "Script error." — the generic, detail-less message browsers emit for
+  // cross-origin scripts (e.g. MediaPipe's CDN worker). It's noise, not our bug.
+  if (!e.message || e.message === 'Script error.') return;
+  const s = document.getElementById('status');
+  if (s) s.textContent = '⚠ error: ' + e.message;
+});
+new p5((p)=>{
+  let video; // p5 element wrapping the <video>
+
+  p.setup = ()=>{
+    const cnv = p.createCanvas(W, H);
+    cnv.parent('wrap');
+    p.pixelDensity(1);          // perf: 1:1 pixels
+    p.frameRate(60);
+    p.imageMode(p.CORNER);
+    p.colorMode(p.RGB, 255, 255, 255, 255);
+    video = document.getElementById('cam');
+    buildLives();
+    updateHud();
+  };
+
+  p.windowResized = ()=>{
+    W = window.innerWidth; H = window.innerHeight;
+    p.resizeCanvas(W, H);
+  };
+
+  p.draw = ()=>{
+    const ctx = p.drawingContext;
+
+    // ---- background: mirrored camera, darkened ----
+    // Use the NATIVE canvas drawImage (p5.image() does not accept a raw <video>).
+    if (video && video.readyState >= 2 && video.videoWidth){
+      const vw = video.videoWidth, vh = video.videoHeight;
+      const scale = Math.max(W/vw, H/vh);      // object-fit: cover
+      const dw = vw*scale, dh = vh*scale;
+      ctx.save();
+      ctx.translate(W, 0); ctx.scale(-1, 1);   // mirror horizontally
+      ctx.drawImage(video, (W-dw)/2, (H-dh)/2, dw, dh);
+      ctx.restore();
+    } else {
+      p.background(4,6,13);
+    }
+
+    // light indigo brand wash over the feed (keep the player clearly visible)
+    p.noStroke();
+    p.fill(10, 13, 58, 90);   // --canvas indigo, ~35% so you still see yourself
+    p.rect(0,0,W,H);
+    drawVignette(ctx);
+
+    updateTip();   // smooth the fingertip cursor every frame (60fps)
+
+    if (gameState === State.PLAYING){
+      updateGame(p);
+    }
+
+    // always render world (so pause/over freeze-frame looks good)
+    renderSplashes(p, ctx);
+    renderFruits(p, ctx);
+    renderParticles(p, ctx);
+    renderPopups(p, ctx);
+    renderBlade(p, ctx);
+    renderCursor(p, ctx);
+  };
+
+});
+
+
+function drawVignette(ctx){
+  const g = ctx.createRadialGradient(W/2,H/2, Math.min(W,H)*0.2, W/2,H/2, Math.max(W,H)*0.7);
+  g.addColorStop(0,'rgba(10,13,58,0)');
+  g.addColorStop(1,'rgba(5,7,30,0.6)');
+  ctx.save(); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); ctx.restore();
+}
+
+// ============================================================
+//  GAME LOGIC
+// ============================================================
+function updateGame(p){
+  const now = performance.now();
+
+  // difficulty ramp: gentle, gets a little faster as the score climbs
+  spawnInterval = Math.max(950, 1500 - score*10);
+
+  // count fruit currently falling (ignore halves/ghosts) and cap the screen
+  let activeFruit = 0;
+  for (const f of fruits){ if (!f.isHalf && !f.isGhost && !f.sliced) activeFruit++; }
+
+  // one fruit at a time, never more than MAX_ACTIVE on screen (prevents pile-ups)
+  if (now - lastSpawn > spawnInterval && activeFruit < MAX_ACTIVE){
+    spawnFruit();
+    lastSpawn = now;
+  }
+
+  // update fruits
+  for (let i=fruits.length-1; i>=0; i--){
+    const f = fruits[i];
+    f.vy += GRAVITY;
+    f.x += f.vx;
+    f.y += f.vy;
+    f.rot += f.vr;
+
+    // slicing check against blade segment
+    if (!f.sliced && tip.active){
+      if (segCircleHit(tip.px, tip.py, tip.x, tip.y, f.x, f.y, f.r*1.05)){
+        if (f.isBomb){ sliceBomb(f); return; }   // instant death — stop the frame
+        sliceFruit(f);
+      }
+    }
+
+    // off-screen bottom
+    if (f.y - f.r > H + 30){
+      // a missed FRUIT costs a life; a bomb you let fall is safe (that's the point)
+      if (!f.sliced && !f.isBomb){ loseLife(); }
+      fruits.splice(i,1);
+    }
+  }
+
+  // update particles
+  for (let i=particles.length-1;i>=0;i--){
+    const pt = particles[i];
+    pt.vy += 0.18;
+    pt.x += pt.vx; pt.y += pt.vy;
+    pt.life -= 0.02;
+    if (pt.life <= 0) particles.splice(i,1);
+  }
+
+  // update splashes (fade)
+  for (let i=splashes.length-1;i>=0;i--){
+    splashes[i].life -= 0.012;
+    if (splashes[i].life <= 0) splashes.splice(i,1);
+  }
+
+  // update score popups (rise & fade)
+  for (let i=popups.length-1;i>=0;i--){
+    const u = popups[i];
+    u.y += u.vy; u.vy *= 0.96; u.life -= 0.018;
+    if (u.life <= 0) popups.splice(i,1);
+  }
+}
+
+function spawnFruit(){
+  // once unlocked, some spawns are bombs to be avoided
+  const isBomb = score >= BOMB_SCORE && Math.random() < BOMB_CHANCE;
+  const def = isBomb ? BOMB : FRUITS[Math.floor(Math.random()*FRUITS.length)];
+  const margin = 90;
+  const x = margin + Math.random()*(W - margin*2);
+  // drop in from ABOVE the top edge; gravity then pulls it down the screen
+  fruits.push({
+    ...def,
+    x, y: -def.r - Math.random()*80,
+    vx: (Math.random()-0.5)*1.6,        // gentle sideways drift
+    vy: 1.0 + Math.random()*0.8,        // gentle initial fall
+    rot: Math.random()*Math.PI*2,
+    vr: (Math.random()-0.5)*0.06,       // slow spin
+    sliced:false,
+  });
+}
+
+function sliceFruit(f){
+  f.sliced = true;
+  score += f.points;
+  if (score > highScore){ highScore = score; }
+  updateHud();
+  bumpScore();
+
+  // splash mark on screen
+  splashes.push({ x:f.x, y:f.y, r:f.r*1.6, c:f.splash, life:1, rot:Math.random()*6 });
+
+  // floating "+N" popup
+  popups.push({ x:f.x, y:f.y - f.r*0.4, text:'+'+f.points, c:f.accent, life:1, vy:-1.4 });
+
+  // juicy particles
+  const n = 10 + Math.floor(f.r/8);
+  for (let i=0;i<n;i++){
+    const a = Math.random()*Math.PI*2;
+    const sp = 2 + Math.random()*7;
+    particles.push({
+      x:f.x, y:f.y,
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - 2,
+      r: 3 + Math.random()*7,
+      c: Math.random()<0.5 ? f.c : f.accent,
+      life: 0.8 + Math.random()*0.5,
+    });
+  }
+  // two halves flying apart
+  for (let s=-1;s<=1;s+=2){
+    fruits.push({
+      ...f,
+      halfSide:s,
+      sliced:true, isHalf:true, isGhost:false,
+      vx: f.vx + s*3.4,
+      vy: f.vy - 1.5,
+      vr: f.vr + s*0.18,
+    });
+  }
+  // remove original next frame by marking it a fading husk
+  f.fade = 1;
+  f.isGhost = true;
+}
+
+function loseLife(){
+  lives--;
+  updateHud();
+  flashLife();
+  if (lives <= 0) endGame();
+}
+
+// slicing a bomb = instant game over, with a fiery blast
+function sliceBomb(f){
+  f.sliced = true;
+  // big fiery explosion
+  for (let i=0;i<46;i++){
+    const a = Math.random()*Math.PI*2;
+    const sp = 3 + Math.random()*12;
+    const hot = Math.random();
+    particles.push({
+      x:f.x, y:f.y,
+      vx:Math.cos(a)*sp, vy:Math.sin(a)*sp,
+      r: 4 + Math.random()*10,
+      c: hot<0.5 ? [255,170,40] : (hot<0.8 ? [255,80,30] : [120,120,120]),
+      life: 0.9 + Math.random()*0.7,
+    });
+  }
+  splashes.push({ x:f.x, y:f.y, r:f.r*2.6, c:[60,60,60], life:1, rot:Math.random()*6 });
+  fruits = fruits.filter(x => x!==f);
+  explodeFlash();
+  endGame('💥 You sliced a bomb!');
+}
+
+// ---- segment vs circle intersection (blade hit) ----
+function segCircleHit(ax,ay,bx,by,cx,cy,r){
+  const abx=bx-ax, aby=by-ay;
+  const acx=cx-ax, acy=cy-ay;
+  const ab2 = abx*abx+aby*aby || 1e-6;
+  let t = (acx*abx+acy*aby)/ab2;
+  t = Math.max(0, Math.min(1, t));
+  const px=ax+abx*t, py=ay+aby*t;
+  const dx=cx-px, dy=cy-py;
+  return (dx*dx+dy*dy) <= r*r;
+}
+
+// ============================================================
+//  RENDERING
+// ============================================================
+function renderFruits(p, ctx){
+  for (let i=fruits.length-1;i>=0;i--){
+    const f = fruits[i];
+
+    // fading husk left behind after a slice — let it disappear
+    if (f.isGhost){
+      f.fade -= 0.12;
+      if (f.fade<=0){ fruits.splice(i,1); continue; }
+    }
+
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.rotate(f.rot);
+    ctx.globalAlpha = f.isGhost ? Math.max(0, f.fade) : 1;
+
+    if (f.isHalf){
+      // clip to one side of the cut, and nudge the half outward along the cut
+      const dir = f.halfSide;          // -1 left, +1 right
+      ctx.translate(dir*4, 0);
+      ctx.beginPath();
+      const big = f.r*2.4;
+      if (dir>0) ctx.rect(0, -big, big, big*2);
+      else       ctx.rect(-big, -big, big, big*2);
+      ctx.clip();
+      // a thin juicy cut-face line
+      drawFruitEmoji(ctx, f);
+      ctx.beginPath();
+      ctx.moveTo(0,-f.r); ctx.lineTo(0,f.r);
+      ctx.lineWidth = 5; ctx.strokeStyle = `rgba(${f.accent[0]},${f.accent[1]},${f.accent[2]},0.55)`;
+      ctx.stroke();
+    } else {
+      if (f.isBomb){
+        // pulsing red danger halo so bombs are unmistakable
+        const pulse = 0.5 + 0.5*Math.sin(performance.now()/120);
+        ctx.save();
+        ctx.rotate(-f.rot);   // keep the halo steady while the bomb spins
+        ctx.shadowColor = 'rgba(255,40,40,0.95)';
+        ctx.shadowBlur = 24 + pulse*16;
+        ctx.fillStyle = `rgba(255,40,40,${0.18+pulse*0.18})`;
+        ctx.beginPath(); ctx.arc(0,0,f.r*1.15,0,Math.PI*2); ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = `rgba(255,70,70,${0.5+pulse*0.4})`;
+        ctx.beginPath(); ctx.arc(0,0,f.r*1.25,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+      drawFruitEmoji(ctx, f);
+    }
+    ctx.restore();
+  }
+}
+
+// draw a fruit as a colour emoji glyph with a soft realistic drop shadow
+function drawFruitEmoji(ctx, f){
+  const size = f.r * 2.25;
+  ctx.globalAlpha = (f.isGhost ? Math.max(0, f.fade) : 1);   // force opaque
+  ctx.fillStyle = '#ffffff';                                  // opaque fallback colour
+  ctx.font = `${size}px ${EMOJI_FONT}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.5)';
+  ctx.shadowBlur = 10;
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = 5;
+  // emoji baselines vary; nudge slightly so it's visually centred
+  ctx.fillText(f.emoji, 0, size*0.02);
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+}
+
+function renderParticles(p, ctx){
+  ctx.save();
+  ctx.shadowBlur = 0;   // particles are small & numerous — skip per-particle glow
+  for (const pt of particles){
+    ctx.globalAlpha = Math.max(0, pt.life);
+    ctx.fillStyle = `rgb(${pt.c[0]},${pt.c[1]},${pt.c[2]})`;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r*pt.life, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function renderPopups(p, ctx){
+  ctx.save();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  for (const u of popups){
+    const a = Math.max(0, Math.min(1, u.life));
+    const scale = 1 + (1-a)*0.6;
+    ctx.globalAlpha = a;
+    ctx.font = `800 ${Math.round(34*scale)}px "Hanken Grotesk", sans-serif`;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = `rgb(${u.c[0]},${u.c[1]},${u.c[2]})`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(u.text, u.x, u.y);
+  }
+  ctx.restore();
+}
+
+function renderSplashes(p, ctx){
+  ctx.save();
+  ctx.shadowBlur = 0;   // splats are large translucent fills — glow not needed
+  for (const s of splashes){
+    ctx.globalAlpha = Math.max(0, s.life*0.6);
+    ctx.fillStyle = `rgba(${s.c[0]},${s.c[1]},${s.c[2]},0.5)`;
+    // splatter: irregular blobs
+    const blobs = 7;
+    for (let i=0;i<blobs;i++){
+      const a = s.rot + i*(Math.PI*2/blobs);
+      const dist = s.r*(0.4 + (i%2?0.5:0.2));
+      const bx = s.x + Math.cos(a)*dist*(1.6-s.life);
+      const by = s.y + Math.sin(a)*dist*(1.6-s.life);
+      const br = s.r*0.22*(0.6+ (i%3)*0.3);
+      ctx.beginPath(); ctx.arc(bx,by,br,0,Math.PI*2); ctx.fill();
+    }
+    ctx.beginPath(); ctx.arc(s.x,s.y,s.r*0.5*(0.6+ (1-s.life)),0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ----- the glowing gradient blade trail -----
+const BLADE_MS = 190;
+function renderBlade(p, ctx){
+  const now = performance.now();
+  blades = blades.filter(b => now - b.t < BLADE_MS);
+  if (blades.length < 2) return;
+
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  // single glow pass: one gradient stroke (cheap) instead of a shadow per segment
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = 'rgba(123,91,255,0.8)';
+  for (let i=1;i<blades.length;i++){
+    const a = blades[i-1], b = blades[i];
+    const tnorm = i/blades.length;
+    const alpha = 1 - (now - b.t)/BLADE_MS;
+    const col = neonGradientColor(tnorm);
+    ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha})`;
+    ctx.lineWidth = (2 + tnorm*15) * alpha + 2;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+  // white-hot core (no shadow)
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(blades[0].x, blades[0].y);
+  for (let i=1;i<blades.length;i++) ctx.lineTo(blades[i].x, blades[i].y);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function neonGradientColor(t){
+  // Discord chord: link-cyan -> blurple -> magenta along the blade
+  const cyan=[0,176,244], blurple=[88,101,242], mag=[236,72,189];
+  if (t<0.5){ const k=t/0.5; return lerp3(cyan,blurple,k); }
+  const k=(t-0.5)/0.5; return lerp3(blurple,mag,k);
+}
+function lerp3(a,b,k){ return [a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k]; }
+
+function renderCursor(p, ctx){
+  if (!tip.active) return;
+  ctx.save();
+  ctx.shadowBlur = 26;
+  ctx.shadowColor = 'rgba(88,101,242,0.95)';
+  ctx.fillStyle = 'rgba(255,255,255,0.98)';
+  ctx.beginPath(); ctx.arc(tip.x, tip.y, 8, 0, Math.PI*2); ctx.fill();
+  ctx.lineWidth=2.5; ctx.strokeStyle='rgba(88,101,242,0.95)';
+  ctx.beginPath(); ctx.arc(tip.x, tip.y, 17, 0, Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+// ============================================================
+//  HUD
+// ============================================================
+function buildLives(){
+  els.lives.innerHTML='';
+  for (let i=0;i<MAX_LIVES;i++){
+    const span = document.createElement('span');
+    span.className='life';
+    span.innerHTML = heartSVG();
+    els.lives.appendChild(span);
+  }
+}
+function heartSVG(){
+  return `<svg class="life" viewBox="0 0 24 24" fill="#ec48bd" xmlns="http://www.w3.org/2000/svg">
+    <path d="M12 21s-7.5-4.6-10-9.2C.4 8.7 2 5 5.5 5 8 5 9.5 6.8 12 9c2.5-2.2 4-4 6.5-4C22 5 23.6 8.7 22 11.8 19.5 16.4 12 21 12 21z"/></svg>`;
+}
+function updateHud(){
+  els.score.textContent = score;
+  els.hi.textContent = 'BEST ' + highScore;
+  const hearts = els.lives.querySelectorAll('.life, span.life');
+  const spans = els.lives.children;
+  for (let i=0;i<spans.length;i++){
+    if (i < lives) spans[i].classList.remove('lost');
+    else spans[i].classList.add('lost');
+  }
+}
+function bumpScore(){
+  els.score.style.transform='scale(1.25)';
+  setTimeout(()=> els.score.style.transform='scale(1)', 120);
+}
+function flashLife(){
+  document.body.animate(
+    [{filter:'brightness(2.4) saturate(2)'},{filter:'none'}],
+    {duration:260, easing:'ease-out'}
+  );
+}
+function explodeFlash(){
+  const el = document.getElementById('boom');
+  el.style.transition='none'; el.style.opacity='1';
+  requestAnimationFrame(()=>{ el.style.transition='opacity .55s ease-out'; el.style.opacity='0'; });
+}
+
+// ============================================================
+//  GAME FLOW
+// ============================================================
+function startGame(){
+  score=0; lives=MAX_LIVES;
+  fruits=[]; particles=[]; splashes=[]; popups=[]; blades=[];
+  spawnInterval=1100; lastSpawn=performance.now(); gameStartTime=performance.now();
+  updateHud();
+  els.startScreen.classList.add('hidden');
+  els.overScreen.classList.add('hidden');
+  els.pauseScreen.classList.add('hidden');
+  els.hud.classList.remove('hidden');
+  gameState = State.PLAYING;
+  setStatus('point your index finger to slice');
+}
+function pauseGame(){
+  if (gameState!==State.PLAYING) return;
+  gameState = State.PAUSED;
+  els.pauseScreen.classList.remove('hidden');
+}
+function resumeGame(){
+  // Resume is ONLY valid from a mid-game pause — never from game over.
+  if (gameState!==State.PAUSED) return;
+  els.pauseScreen.classList.add('hidden');
+  els.hud.classList.remove('hidden');
+  lastSpawn = performance.now();
+  gameState = State.PLAYING;
+}
+function endGame(reason){
+  gameState = State.OVER;
+  const isNew = score >= highScore && score>0;
+  highScore = Math.max(highScore, score);
+  localStorage.setItem('neonFruitHi', String(highScore));
+  els.finalScore.querySelector('.v').textContent = score;
+  els.hiFinal.querySelector('.v').textContent = highScore;
+  els.newHi.style.display = isNew ? 'block' : 'none';
+  els.overReason.textContent = reason || 'Out of lives';
+  els.overScreen.classList.remove('hidden');
+  updateHud();
+}
+
+function setStatus(t){ els.status.textContent = t; }
+
+// ============================================================
+//  MEDIAPIPE HANDS + CAMERA
+// ============================================================
+const videoEl = document.getElementById('cam');
+let handLandmarker = null;
+let cameraBooted = false;   // ensures we only request the camera once
+
+// Map a normalized video coord (0..1 in the source frame) to ON-SCREEN pixels,
+// applying the SAME object-fit:cover + horizontal-mirror transform the canvas uses
+// to draw the video. Without this, the cropped/scaled video and the landmark space
+// disagree and the cursor drifts away from the real finger.
+const REACH_X = 1.22;   // expand horizontal reach around centre
+const REACH_Y = 1.42;   // expand vertical reach MORE — the bottom of the camera frame
+                        // is where the hand is hardest to detect, so a comfortable,
+                        // central downward move already reaches the bottom of the screen.
+function videoToScreen(nx, ny){
+  nx = Math.min(1, Math.max(0, 0.5 + (nx - 0.5) * REACH_X));
+  ny = Math.min(1, Math.max(0, 0.5 + (ny - 0.5) * REACH_Y));
+  const vw = videoEl.videoWidth, vh = videoEl.videoHeight;
+  if (!vw || !vh) return { x:(1-nx)*W, y:ny*H };   // fallback before metadata loads
+  const scale = Math.max(W/vw, H/vh);
+  const dw = vw*scale, dh = vh*scale;
+  const offX = (W-dw)/2, offY = (H-dh)/2;
+  const sx = offX + nx*dw;          // un-mirrored screen x
+  return { x: W - sx, y: offY + ny*dh };
+}
+
+/* ---- One-Euro filter: smooths jitter while staying responsive on fast moves.
+   The standard for cursor/finger tracking — far better than a fixed lerp. ---- */
+function OneEuro(minCutoff, beta, dCutoff){
+  let xPrev=null, dxPrev=0, tPrev=0;
+  const alpha=(cut,dt)=>{ const tau=1/(2*Math.PI*cut); return 1/(1+tau/dt); };
+  return {
+    reset(){ xPrev=null; dxPrev=0; },
+    filter(x, t){
+      if (xPrev===null){ xPrev=x; tPrev=t; return x; }
+      const dt = Math.max(1e-3, (t - tPrev)/1000); tPrev=t;
+      const dx = (x - xPrev)/dt;
+      const aD = alpha(dCutoff, dt);
+      dxPrev = aD*dx + (1-aD)*dxPrev;
+      const cutoff = minCutoff + beta*Math.abs(dxPrev);
+      const a = alpha(cutoff, dt);
+      xPrev = a*x + (1-a)*xPrev;
+      return xPrev;
+    }
+  };
+}
+// tuned: low jitter at rest, snappy on fast slices
+const euroX = OneEuro(2.2, 0.030, 1.0);
+const euroY = OneEuro(2.2, 0.030, 1.0);
+
+// latest RAW detection target (updated every camera frame)
+let tipTarget = { x:0, y:0, seen:0, has:false };
+
+// Pull index-fingertip (landmark 8) out of a HandLandmarker result.
+function onLandmarks(res){
+  if (res && res.landmarks && res.landmarks.length>0){
+    const lm = res.landmarks[0][8];
+    const t = videoToScreen(lm.x, lm.y);
+    tipTarget.x = t.x; tipTarget.y = t.y; tipTarget.seen = performance.now();
+    tipTarget.has = true;
+  } else {
+    tipTarget.has = false;
+  }
+}
+
+// Smooth the visible cursor every render frame (60fps) via One-Euro.
+function updateTip(){
+  const now = performance.now();
+  if (tipTarget.has && now - tipTarget.seen < 250){
+    const nx = euroX.filter(tipTarget.x, now);
+    const ny = euroY.filter(tipTarget.y, now);
+    tip.px = tip.x; tip.py = tip.y;        // previous → blade segment start
+    tip.x = nx; tip.y = ny;
+    tip.active = true;
+    if (gameState===State.PLAYING){
+      blades.push({ x: tip.x, y: tip.y, t: now });
+      if (blades.length > 24) blades.shift();
+    }
+  } else {
+    tip.active = false;
+    euroX.reset(); euroY.reset();
+  }
+}
+
+// Detection loop: run inference on EVERY new camera frame (freshest possible data).
+let _lastVideoTs = -1;
+function startDetectLoop(){
+  const run = ()=>{
+    if (handLandmarker && videoEl.readyState >= 2){
+      let ts = performance.now();
+      if (ts <= _lastVideoTs) ts = _lastVideoTs + 1;   // must be strictly increasing
+      _lastVideoTs = ts;
+      try { onLandmarks(handLandmarker.detectForVideo(videoEl, ts)); }
+      catch(e){ /* transient frame errors are fine */ }
+    }
+    if (videoEl.requestVideoFrameCallback) videoEl.requestVideoFrameCallback(run);
+    else requestAnimationFrame(run);
+  };
+  if (videoEl.requestVideoFrameCallback) videoEl.requestVideoFrameCallback(run);
+  else requestAnimationFrame(run);
+}
+
+async function boot(){
+  if (cameraBooted) return;
+  cameraBooted = true;
+  els.loadNote.textContent = 'requesting camera…';
+  setStatus('requesting camera access…');
+
+  // --- STEP 1: get the camera directly. Guarantees the live video background as
+  //     soon as the user clicks "Allow", independent of the model loading. ---
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal:1280 }, height: { ideal:720 }, facingMode: 'user' },
+      audio: false,
+    });
+    videoEl.srcObject = stream;
+    await videoEl.play();
+    els.loadNote.textContent = '';
+    setStatus('camera on — loading hand tracking…');
+  } catch(err){
+    console.error('camera error', err);
+    const msg = (err.name === 'NotAllowedError')
+      ? 'camera permission denied — click the camera icon in the address bar, allow it, then reload'
+      : 'camera unavailable: ' + (err.message || err);
+    els.loadNote.textContent = msg;
+    setStatus('⚠ ' + msg);
+    return; // game still runs; just no hand input
+  }
+
+  // --- STEP 2: modern MediaPipe Tasks HandLandmarker, GPU-accelerated. ---
+  try{
+    const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+    const { HandLandmarker, FilesetResolver } = vision;
+    const fileset = await FilesetResolver.forVisionTasks(
+      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+    handLandmarker = await HandLandmarker.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate: 'GPU',
+      },
+      numHands: 1,
+      runningMode: 'VIDEO',
+      minHandDetectionConfidence: 0.5,
+      minHandPresenceConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    startDetectLoop();
+    setStatus('point your index finger to slice');
+  } catch(err){
+    console.error('hand-tracking load error', err);
+    setStatus('⚠ hand-tracking failed to load — video shows but slicing is off');
+  }
+}
+
+// ============================================================
+//  WIRING
+// ============================================================
+$('startBtn').addEventListener('click', ()=>{
+  // Kick off the camera in the BACKGROUND (don't await it — a pending or
+  // denied camera-permission prompt must never block the game from starting).
+  if (!cameraBooted){ boot(); }
+  // Start playing immediately. Fruit fall right away on the dark background;
+  // the live video simply fades in once the camera stream is ready.
+  startGame();
+});
+$('pauseBtn').addEventListener('click', pauseGame);
+$('resumeBtn').addEventListener('click', resumeGame);
+$('restartFromPause').addEventListener('click', startGame);
+$('playAgainBtn').addEventListener('click', startGame);
+
+// keyboard: P/Esc pause-toggle (mid-game only)
+window.addEventListener('keydown', (e)=>{
+  if (e.key==='p' || e.key==='P' || e.key==='Escape'){
+    if (gameState===State.PLAYING) pauseGame();
+    else if (gameState===State.PAUSED) resumeGame();
+  }
+});
+
+setStatus('press Start to enable camera');
+</script>
+</body>
+</html>
