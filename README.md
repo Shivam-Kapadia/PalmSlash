@@ -1,6 +1,6 @@
-# 🥷 Fruit Ninja — but you're the blade
+# 🥷 Fruit Ninja — but you're the blade  ·  v1.1
 
-A little Fruit Ninja clone I built that uses your **webcam and your index finger** instead of a mouse or a touchscreen. Point at the screen, swipe through the fruit, and watch it split apart. No controller, no keyboard — just your hand in the air.
+A little Fruit Ninja clone I built that uses your **webcam and your hands** instead of a mouse or a touchscreen. Point at the screen, swipe through the fruit, and watch it split apart. No controller, no keyboard — just your hands in the air.
 
 It's one single `index.html` file. That's the whole game. Open it and play.
 
@@ -9,23 +9,32 @@ It's one single `index.html` file. That's the whole game. Open it and play.
 
 ---
 
+## 🆕 What's new in v1.1
+
+- **Two-handed play** — bring up both hands and you get **two independent blades**. Twice the carnage.
+- **Power slices** — swipe *fast* and you land a ⚡ power slice: bonus point, bigger splash, more juice.
+- **Pinch for precision** — close your thumb and index finger for a tight, deliberate cut when things get crowded.
+- **Difficulty ramp** — past 30 points the game steps up every 10 points: faster fruit, more on screen, more bombs.
+- **Way smoother tracking** — rebuilt the whole tracking pipeline to be much more fluid and a lot less laggy (see below).
+
+---
+
 ## What it does
 
-- Tracks the tip of your **index finger** in real time and turns it into a glowing blade.
+- Tracks your **index fingertip(s)** in real time and turns them into glowing blades.
 - Fruit fall from the top — 🍊 oranges, 🍅 tomatoes, 🍉 watermelons, 🍌 bananas, 🍇 grapes, 🍓 strawberries, 🍋 lemons. Slice them for points; they burst into juice and fly apart in two halves.
 - You get **3 lives**. Let three pieces of fruit hit the floor and it's over.
-- Once you cross **30 points**, **💣 bombs** start dropping in with the fruit. They've got an angry red glow. Slice one and you're instantly done — so for those, keep your hands to yourself.
+- Past **30 points**, **💣 bombs** start dropping in with the fruit, with an angry red glow. Slice one and you're instantly done — for those, just keep your hands away and let them fall.
 - Your **high score** is saved locally, so you've always got a number to beat.
-- There's a pause button if life happens mid-run.
 
 ## How to play
 
-1. Open the link above (or the file locally — see below).
+1. Open the link above (or run it locally — see below).
 2. Allow the camera.
-3. Stand back far enough that your hand is comfortably in frame, with decent lighting.
-4. Hold up your index finger and **swipe through the fruit**. Dodge the bombs once they show up.
+3. Stand back far enough that your hands are comfortably in frame, with decent lighting.
+4. **Swipe through the fruit.** Use both hands for two blades, swipe fast for power slices, pinch for precise cuts — and dodge the bombs once they appear.
 
-Works best when the room isn't too dark and your hand isn't lost against a busy background.
+Works best when the room isn't too dark and your hands aren't lost against a busy background.
 
 ## Running it yourself
 
@@ -43,18 +52,22 @@ Then open `http://localhost:8000`. Any tiny static server does the job.
 
 Nothing heavy — it's deliberately a single file with no build step.
 
-- **[p5.js](https://p5js.org/)** for the canvas, the fruit, the juice particles, and the blade trail.
-- **[MediaPipe Tasks – Hand Landmarker](https://ai.google.dev/edge/mediapipe)** (running on the GPU) for the actual hand tracking. It hands back 21 points on your hand every frame; I use the index fingertip.
-- A **One-Euro filter** to smooth the cursor — it kills the jitter when your hand is still but stays snappy when you swipe fast. This was the single biggest thing that made it feel good instead of janky.
-- The look is a neon, Discord-flavoured dark theme — deep indigo, blurple, magenta.
+- **[p5.js](https://p5js.org/)** for the canvas, the fruit, the juice particles, and the blade trails.
+- **[MediaPipe Tasks – Hand Landmarker](https://ai.google.dev/edge/mediapipe)** (running on the GPU) for the hand tracking. It returns 21 points per hand every frame; I use the index fingertips, and read pinch from the thumb–index distance.
+- A **One-Euro filter** smooths each cursor — it kills jitter when your hand is still but stays snappy when you swipe fast.
 
-A couple of things I had to fight with along the way, in case you tinker:
-- The webcam feed is cropped to fill the screen, so the raw landmark coordinates don't line up with what you see — everything has to go through the same crop/mirror transform or the blade drifts off your finger.
-- I nudged the tracking to be a bit more reachable toward the bottom of the screen, since that's where hands tend to slip out of the camera's view.
+### Making it smooth (the v1.1 fight)
+Getting two-handed tracking to feel fluid took some doing:
+- The heaviest thing on the page is the model inference, and it blocks the render loop while it runs — so I **throttle detection** to a sane rate and let the **60fps One-Euro smoothing fill the gaps**. Looks just as smooth, far less lag.
+- The webcam feed is cropped to fill the screen, so raw landmark coordinates don't line up with what you see — everything goes through the same crop/mirror transform or the blade drifts off your finger.
+- I expand the reach a bit toward the screen edges so the bottom is comfortably reachable without your hand slipping out of the camera's view.
+- A touch of velocity prediction trims the perceived latency so the blade stays glued to your fingertip.
+
+The look is a neon, Discord-flavoured dark theme — deep indigo, blurple, magenta.
 
 ## Heads up
 
-- It's a webcam toy, so the experience depends on your camera, lighting, and machine. On a decent laptop it runs smooth; on something older it might chug a little.
+- It's a webcam toy, so the experience depends on your camera, lighting, and machine. On a decent laptop it runs smooth; on something older it might chug a little (two hands is heavier than one).
 - First load pulls the tracking model (a few MB) from a CDN, so the very first "loading hand tracking…" takes a moment.
 
 ---
