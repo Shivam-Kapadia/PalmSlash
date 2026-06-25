@@ -85,18 +85,6 @@
     font-size:13px; font-weight:700; color:var(--green);
     margin-top:6px; letter-spacing:1px;
   }
-  /* in-game pause button (HUD is pointer-events:none, so re-enable on the button) */
-  #pauseBtn{
-    pointer-events:auto; cursor:pointer; align-self:center;
-    font-family:"Inter",sans-serif; font-size:14px; letter-spacing:2px; color:#fff;
-    width:52px; height:52px; border-radius:50%;
-    background:rgba(30,35,83,0.78); border:1px solid rgba(255,255,255,0.12);
-    backdrop-filter:blur(12px); box-shadow:var(--shadow-soft);
-    transition:transform .14s cubic-bezier(.2,1.6,.4,1), background .2s;
-  }
-  #pauseBtn:hover{ transform:scale(1.08); background:rgba(88,101,242,0.55); }
-  #pauseBtn:active{ transform:scale(.96); }
-
   #livesWrap{ text-align:right; }
   #livesWrap .label{ display:block; margin-bottom:8px; }
   #lives{ display:flex; gap:10px; align-items:center; justify-content:flex-end; }
@@ -233,6 +221,12 @@
   }
   @keyframes blink{ 50%{ opacity:.4; } }
 
+  #level{
+    font-family:"Hanken Grotesk",sans-serif; font-weight:700;
+    font-size:12px; color:var(--magenta); margin-top:6px; letter-spacing:1px;
+    text-transform:uppercase;
+  }
+
   #status{
     position:fixed; bottom:16px; left:0; right:0; text-align:center;
     font-size:12px; letter-spacing:1.5px; color:rgba(255,255,255,0.45);
@@ -255,8 +249,8 @@
     <div class="label">Score</div>
     <div id="score">0</div>
     <div id="hi">HI 0</div>
+    <div id="level"></div>
   </div>
-  <button id="pauseBtn" title="Pause (P)">❚❚</button>
   <div id="livesWrap" class="panel">
     <span class="label">Lives</span>
     <div id="lives"></div>
@@ -268,32 +262,20 @@
   <div class="card">
     <div class="title">FRUIT<br/><span class="accent">NINJA</span></div>
     <div class="sub">
-      Slice the fruit with your <b>index finger</b> in front of the camera.<br/>
-      Miss <b>three</b> and it's game over. Past <b>30 points</b>, dodge the <b>💣 bombs</b> — slice one and you're done.
+      Slice the fruit with your <b>index finger</b> — use <b>both hands</b> for two blades.
+      Fast swipes are <b>⚡ power slices</b>. Miss <b>three</b> and it's over.
+      Past <b>30 points</b>, dodge the <b>💣 bombs</b> — slice one and you're done.
     </div>
     <div class="fruitline">
-      <span class="chip"><span class="em">🍊</span>Orange</span>
-      <span class="chip"><span class="em">🍉</span>Watermelon</span>
-      <span class="chip"><span class="em">🍌</span>Banana</span>
-      <span class="chip"><span class="em">🍇</span>Grape</span>
+      <span class="chip"><span class="em">✌️</span>Two hands = Two blades</span>
+      <span class="chip"><span class="em">⚡</span>Fast = Power slice</span>
+      <span class="chip"><span class="em">🤏</span>Pinch = Precise cut</span>
       <span class="chip chip-bomb"><span class="em">💣</span>Avoid!</span>
     </div>
     <div class="btnrow">
       <button class="btn btn-green" id="startBtn">Start Game</button>
     </div>
     <div style="margin-top:18px;font-size:13px;color:rgba(255,255,255,.5);letter-spacing:.5px;" id="loadNote">Allow camera access when prompted</div>
-  </div>
-</div>
-
-<!-- PAUSE overlay -->
-<div id="pauseScreen" class="overlay hidden">
-  <div class="card">
-    <div class="title small">PAUSED</div>
-    <div class="sub" style="margin-bottom:24px;">Take a breath. The fruit will wait.</div>
-    <div class="btnrow">
-      <button class="btn btn-green" id="resumeBtn">Resume</button>
-      <button class="btn btn-ghost" id="restartFromPause">Restart</button>
-    </div>
   </div>
 </div>
 
@@ -337,16 +319,36 @@ let fruits = [];
 let particles = [];
 let splashes = [];
 let popups = [];          // floating "+N" score text
-let blades = [];          // trail points {x,y,t}
 let lastSpawn = 0;
 let spawnInterval = 1100; // ms, ramps down with score
 let gameStartTime = 0;
 
 const GRAVITY = 0.16;     // gentle fall so fruit are catchable on the way down
-const MAX_ACTIVE = 3;     // never let more than this many fruit fall at once
+const BASE_MAX_ACTIVE = 3;
 
-// fingertip in canvas coords (mirrored)
-let tip = { x: -1, y: -1, active:false, px:-1, py:-1 };
+// ---- two-handed tracking: one independent blade per hand ----
+// keyed by handedness label so One-Euro filters stay continuous per physical hand.
+function makeHand(){
+  return {
+    active:false, seen:0,
+    x:0, y:0, px:0, py:0,      // rendered (predicted) position + previous
+    sx:0, sy:0,               // smoothed position (velocity is measured from this)
+    vx:0, vy:0, speed:0,
+    rawX:0, rawY:0,
+    pinch:false,
+    blade:[],                                // trail points {x,y,t}
+    // tuned for smoothness: low minCutoff = very smooth at rest, beta keeps it
+    // responsive when you actually swipe fast.
+    euroX:OneEuro(1.5, 0.05, 1.0),
+    euroY:OneEuro(1.5, 0.05, 1.0),
+  };
+}
+const HANDS = { Left:makeHand(), Right:makeHand() };  // OneEuro is hoisted, so this is safe
+function eachHand(fn){ fn(HANDS.Left); fn(HANDS.Right); }
+
+// ---- slicing tuning ----
+const MIN_SLICE_SPEED = 6;    // px/frame — below this a resting finger won't cut
+const POWER_SPEED = 34;       // px/frame — a fast swipe = power slice (bonus)
 
 // dimensions
 let W = window.innerWidth, H = window.innerHeight;
@@ -354,8 +356,8 @@ let W = window.innerWidth, H = window.innerHeight;
 // ---------- DOM ----------
 const $ = id => document.getElementById(id);
 const els = {};
-['hud','score','hi','lives','status','startScreen','pauseScreen','overScreen',
- 'finalScore','hiFinal','newHi','loadNote','overReason'].forEach(id => els[id]=$(id));
+['hud','score','hi','lives','status','startScreen','overScreen',
+ 'finalScore','hiFinal','newHi','loadNote','overReason','level'].forEach(id => els[id]=$(id));
 
 // ---------- fruit definitions ----------
 // Rendered as full-colour emoji glyphs for realism; whole + half emoji slices.
@@ -431,19 +433,19 @@ new p5((p)=>{
     p.rect(0,0,W,H);
     drawVignette(ctx);
 
-    updateTip();   // smooth the fingertip cursor every frame (60fps)
+    updateHands();   // smooth both fingertips every frame (60fps)
 
     if (gameState === State.PLAYING){
       updateGame(p);
     }
 
-    // always render world (so pause/over freeze-frame looks good)
+    // always render world (so over-screen freeze-frame looks good)
     renderSplashes(p, ctx);
     renderFruits(p, ctx);
     renderParticles(p, ctx);
     renderPopups(p, ctx);
-    renderBlade(p, ctx);
-    renderCursor(p, ctx);
+    renderBlades(p, ctx);
+    renderCursors(p, ctx);
   };
 
 });
@@ -459,35 +461,50 @@ function drawVignette(ctx){
 // ============================================================
 //  GAME LOGIC
 // ============================================================
+// difficulty level: 0 below the bomb threshold, then +1 every 10 points after it
+function difficulty(){
+  if (score < BOMB_SCORE) return 0;
+  return Math.floor((score - BOMB_SCORE)/10) + 1;
+}
+
 function updateGame(p){
   const now = performance.now();
+  const lvl = difficulty();
 
-  // difficulty ramp: gentle, gets a little faster as the score climbs
-  spawnInterval = Math.max(950, 1500 - score*10);
+  // difficulty ramp: faster spawns, faster fall, more on screen, more bombs as you climb
+  spawnInterval = Math.max(480, 1500 - score*10 - lvl*120);
+  const gravityScale = Math.min(2.0, 1 + lvl*0.13);
+  const maxActive    = Math.min(6, BASE_MAX_ACTIVE + Math.floor(lvl/2));
 
-  // count fruit currently falling (ignore halves/ghosts) and cap the screen
   let activeFruit = 0;
   for (const f of fruits){ if (!f.isHalf && !f.isGhost && !f.sliced) activeFruit++; }
 
-  // one fruit at a time, never more than MAX_ACTIVE on screen (prevents pile-ups)
-  if (now - lastSpawn > spawnInterval && activeFruit < MAX_ACTIVE){
-    spawnFruit();
+  if (now - lastSpawn > spawnInterval && activeFruit < maxActive){
+    spawnFruit(lvl);
     lastSpawn = now;
   }
 
   // update fruits
   for (let i=fruits.length-1; i>=0; i--){
     const f = fruits[i];
-    f.vy += GRAVITY;
+    f.vy += GRAVITY * gravityScale;
     f.x += f.vx;
     f.y += f.vy;
     f.rot += f.vr;
 
-    // slicing check against blade segment
-    if (!f.sliced && tip.active){
-      if (segCircleHit(tip.px, tip.py, tip.x, tip.y, f.x, f.y, f.r*1.05)){
+    // slicing check — test BOTH hands' blade segments
+    if (!f.sliced){
+      let hit=null;
+      eachHand(h=>{
+        if (hit) return;
+        if (h.active && (h.speed >= MIN_SLICE_SPEED || h.pinch) &&
+            segCircleHit(h.px, h.py, h.x, h.y, f.x, f.y, f.r*1.05)){
+          hit = h;
+        }
+      });
+      if (hit){
         if (f.isBomb){ sliceBomb(f); return; }   // instant death — stop the frame
-        sliceFruit(f);
+        sliceFruit(f, hit.speed >= POWER_SPEED);
       }
     }
 
@@ -522,9 +539,11 @@ function updateGame(p){
   }
 }
 
-function spawnFruit(){
-  // once unlocked, some spawns are bombs to be avoided
-  const isBomb = score >= BOMB_SCORE && Math.random() < BOMB_CHANCE;
+function spawnFruit(lvl){
+  lvl = lvl || 0;
+  // once unlocked, some spawns are bombs — the chance creeps up with difficulty
+  const bombChance = Math.min(0.45, BOMB_CHANCE + (lvl-1)*0.02);
+  const isBomb = score >= BOMB_SCORE && Math.random() < bombChance;
   const def = isBomb ? BOMB : FRUITS[Math.floor(Math.random()*FRUITS.length)];
   const margin = 90;
   const x = margin + Math.random()*(W - margin*2);
@@ -540,24 +559,25 @@ function spawnFruit(){
   });
 }
 
-function sliceFruit(f){
+function sliceFruit(f, power){
   f.sliced = true;
-  score += f.points;
+  const pts = f.points + (power ? 1 : 0);     // fast swipe = bonus point
+  score += pts;
   if (score > highScore){ highScore = score; }
   updateHud();
   bumpScore();
 
-  // splash mark on screen
-  splashes.push({ x:f.x, y:f.y, r:f.r*1.6, c:f.splash, life:1, rot:Math.random()*6 });
+  // splash mark on screen (bigger on a power slice)
+  splashes.push({ x:f.x, y:f.y, r:f.r*(power?2.2:1.6), c:f.splash, life:1, rot:Math.random()*6 });
 
   // floating "+N" popup
-  popups.push({ x:f.x, y:f.y - f.r*0.4, text:'+'+f.points, c:f.accent, life:1, vy:-1.4 });
+  popups.push({ x:f.x, y:f.y - f.r*0.4, text:(power?'⚡+':'+')+pts, c:f.accent, life:1, vy:-1.4 });
 
-  // juicy particles
-  const n = 10 + Math.floor(f.r/8);
+  // juicy particles (more on a power slice)
+  const n = (10 + Math.floor(f.r/8)) * (power?1.7:1);
   for (let i=0;i<n;i++){
     const a = Math.random()*Math.PI*2;
-    const sp = 2 + Math.random()*7;
+    const sp = (2 + Math.random()*7) * (power?1.5:1);
     particles.push({
       x:f.x, y:f.y,
       vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - 2,
@@ -741,39 +761,37 @@ function renderSplashes(p, ctx){
   ctx.restore();
 }
 
-// ----- the glowing gradient blade trail -----
+// ----- the glowing gradient blade trail (one per hand) -----
 const BLADE_MS = 190;
-function renderBlade(p, ctx){
+function renderBlades(p, ctx){
   const now = performance.now();
-  blades = blades.filter(b => now - b.t < BLADE_MS);
-  if (blades.length < 2) return;
-
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  // single glow pass: one gradient stroke (cheap) instead of a shadow per segment
-  ctx.shadowBlur = 14;
-  ctx.shadowColor = 'rgba(123,91,255,0.8)';
-  for (let i=1;i<blades.length;i++){
-    const a = blades[i-1], b = blades[i];
-    const tnorm = i/blades.length;
-    const alpha = 1 - (now - b.t)/BLADE_MS;
-    const col = neonGradientColor(tnorm);
-    ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha})`;
-    ctx.lineWidth = (2 + tnorm*15) * alpha + 2;
+  eachHand(h=>{
+    const blade = h.blade;
+    if (blade.length < 2) return;
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = 'rgba(123,91,255,0.8)';
+    for (let i=1;i<blade.length;i++){
+      const a = blade[i-1], b = blade[i];
+      const tnorm = i/blade.length;
+      const alpha = 1 - (now - b.t)/BLADE_MS;
+      if (alpha<=0) continue;
+      const col = neonGradientColor(tnorm);
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${alpha})`;
+      ctx.lineWidth = (2 + tnorm*15) * alpha + 2;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    }
+    // white-hot core (no shadow)
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
+    ctx.moveTo(blade[0].x, blade[0].y);
+    for (let i=1;i<blade.length;i++) ctx.lineTo(blade[i].x, blade[i].y);
     ctx.stroke();
-  }
-  // white-hot core (no shadow)
-  ctx.shadowBlur = 0;
-  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(blades[0].x, blades[0].y);
-  for (let i=1;i<blades.length;i++) ctx.lineTo(blades[i].x, blades[i].y);
-  ctx.stroke();
+  });
   ctx.restore();
 }
 
@@ -785,15 +803,20 @@ function neonGradientColor(t){
 }
 function lerp3(a,b,k){ return [a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k]; }
 
-function renderCursor(p, ctx){
-  if (!tip.active) return;
+function renderCursors(p, ctx){
   ctx.save();
-  ctx.shadowBlur = 26;
-  ctx.shadowColor = 'rgba(88,101,242,0.95)';
-  ctx.fillStyle = 'rgba(255,255,255,0.98)';
-  ctx.beginPath(); ctx.arc(tip.x, tip.y, 8, 0, Math.PI*2); ctx.fill();
-  ctx.lineWidth=2.5; ctx.strokeStyle='rgba(88,101,242,0.95)';
-  ctx.beginPath(); ctx.arc(tip.x, tip.y, 17, 0, Math.PI*2); ctx.stroke();
+  eachHand(h=>{
+    if (!h.active) return;
+    const pinch = h.pinch;
+    // magenta on pinch (precision), blurple normally
+    const col = pinch ? '236,72,189' : '88,101,242';
+    ctx.shadowBlur = 26; ctx.shadowColor = `rgba(${col},0.95)`;
+    ctx.fillStyle = 'rgba(255,255,255,0.98)';
+    const inner = pinch ? 6 : 8;
+    ctx.beginPath(); ctx.arc(h.x, h.y, inner, 0, Math.PI*2); ctx.fill();
+    ctx.lineWidth=2.5; ctx.strokeStyle=`rgba(${col},0.95)`;
+    ctx.beginPath(); ctx.arc(h.x, h.y, pinch?12:17, 0, Math.PI*2); ctx.stroke();
+  });
   ctx.restore();
 }
 
@@ -816,7 +839,8 @@ function heartSVG(){
 function updateHud(){
   els.score.textContent = score;
   els.hi.textContent = 'BEST ' + highScore;
-  const hearts = els.lives.querySelectorAll('.life, span.life');
+  const lvl = difficulty();
+  els.level.textContent = lvl>0 ? ('LEVEL ' + lvl) : '';
   const spans = els.lives.children;
   for (let i=0;i<spans.length;i++){
     if (i < lives) spans[i].classList.remove('lost');
@@ -844,28 +868,15 @@ function explodeFlash(){
 // ============================================================
 function startGame(){
   score=0; lives=MAX_LIVES;
-  fruits=[]; particles=[]; splashes=[]; popups=[]; blades=[];
+  fruits=[]; particles=[]; splashes=[]; popups=[];
   spawnInterval=1100; lastSpawn=performance.now(); gameStartTime=performance.now();
+  eachHand(h=>{ h.blade.length=0; h.active=false; });
   updateHud();
   els.startScreen.classList.add('hidden');
   els.overScreen.classList.add('hidden');
-  els.pauseScreen.classList.add('hidden');
   els.hud.classList.remove('hidden');
   gameState = State.PLAYING;
-  setStatus('point your index finger to slice');
-}
-function pauseGame(){
-  if (gameState!==State.PLAYING) return;
-  gameState = State.PAUSED;
-  els.pauseScreen.classList.remove('hidden');
-}
-function resumeGame(){
-  // Resume is ONLY valid from a mid-game pause — never from game over.
-  if (gameState!==State.PAUSED) return;
-  els.pauseScreen.classList.add('hidden');
-  els.hud.classList.remove('hidden');
-  lastSpawn = performance.now();
-  gameState = State.PLAYING;
+  setStatus('point your finger(s) to slice · fast swipe = power slice');
 }
 function endGame(reason){
   gameState = State.OVER;
@@ -929,50 +940,81 @@ function OneEuro(minCutoff, beta, dCutoff){
     }
   };
 }
-// tuned: low jitter at rest, snappy on fast slices
-const euroX = OneEuro(2.2, 0.030, 1.0);
-const euroY = OneEuro(2.2, 0.030, 1.0);
+// ---- pinch detection from landmarks (thumb tip ↔ index tip, normalised by palm size)
+function lmDist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+function isPinch(lm){
+  const scale = lmDist(lm[0], lm[9]) || 1e-4;       // palm size
+  return lmDist(lm[4], lm[8]) < scale*0.55;
+}
 
-// latest RAW detection target (updated every camera frame)
-let tipTarget = { x:0, y:0, seen:0, has:false };
-
-// Pull index-fingertip (landmark 8) out of a HandLandmarker result.
+// HandLandmarker result → update per-hand RAW targets (called per camera frame).
 function onLandmarks(res){
-  if (res && res.landmarks && res.landmarks.length>0){
-    const lm = res.landmarks[0][8];
-    const t = videoToScreen(lm.x, lm.y);
-    tipTarget.x = t.x; tipTarget.y = t.y; tipTarget.seen = performance.now();
-    tipTarget.has = true;
-  } else {
-    tipTarget.has = false;
-  }
-}
-
-// Smooth the visible cursor every render frame (60fps) via One-Euro.
-function updateTip(){
-  const now = performance.now();
-  if (tipTarget.has && now - tipTarget.seen < 250){
-    const nx = euroX.filter(tipTarget.x, now);
-    const ny = euroY.filter(tipTarget.y, now);
-    tip.px = tip.x; tip.py = tip.y;        // previous → blade segment start
-    tip.x = nx; tip.y = ny;
-    tip.active = true;
-    if (gameState===State.PLAYING){
-      blades.push({ x: tip.x, y: tip.y, t: now });
-      if (blades.length > 24) blades.shift();
+  const fresh = { Left:false, Right:false };
+  if (res && res.landmarks){
+    for (let i=0;i<res.landmarks.length;i++){
+      const lm = res.landmarks[i];
+      let label = (res.handedness && res.handedness[i] && res.handedness[i][0])
+        ? res.handedness[i][0].categoryName : (i===0?'Right':'Left');
+      if (fresh[label]) label = (label==='Left')?'Right':'Left';   // avoid collisions
+      const h = HANDS[label];
+      const t = videoToScreen(lm[8].x, lm[8].y);
+      h.rawX = t.x; h.rawY = t.y; h.seen = performance.now();
+      h.pinch = isPinch(lm);
+      fresh[label] = true;
     }
-  } else {
-    tip.active = false;
-    euroX.reset(); euroY.reset();
   }
 }
 
-// Detection loop: run inference on EVERY new camera frame (freshest possible data).
-let _lastVideoTs = -1;
+const PREDICT = 0.9;   // frames of velocity lead-ahead — trims perceived latency
+// Smooth both fingertips every render frame (60fps) via One-Euro + smoothed prediction.
+// The render loop runs at 60fps while detection is throttled lower, so this is what
+// actually makes the cursor look fluid — it interpolates toward the latest sample.
+function updateHands(){
+  const now = performance.now();
+  eachHand(h=>{
+    if (h.seen && now - h.seen < 220){
+      const sx = h.euroX.filter(h.rawX, now);   // smoothed position
+      const sy = h.euroY.filter(h.rawY, now);
+      if (!h.active){
+        // just re-acquired — snap, no phantom velocity
+        h.sx=sx; h.sy=sy; h.x=sx; h.y=sy; h.px=sx; h.py=sy;
+        h.vx=0; h.vy=0; h.speed=0; h.active=true;
+      } else {
+        // EMA-smoothed velocity → smoother prediction → smoother blade
+        h.vx = 0.6*h.vx + 0.4*(sx - h.sx);
+        h.vy = 0.6*h.vy + 0.4*(sy - h.sy);
+        h.speed = Math.hypot(sx - h.sx, sy - h.sy);
+        h.sx = sx; h.sy = sy;
+        h.px = h.x; h.py = h.y;                  // previous rendered → blade segment start
+        h.x = sx + h.vx*PREDICT;
+        h.y = sy + h.vy*PREDICT;
+      }
+      if (gameState===State.PLAYING){
+        h.blade.push({ x:h.x, y:h.y, t:now });
+        if (h.blade.length > 22) h.blade.shift();
+      }
+    } else {
+      h.active = false; h.pinch=false;
+      h.euroX.reset(); h.euroY.reset();
+      h.blade.length = 0;
+    }
+  });
+  // expire old blade points even when the hand is gone
+  eachHand(h=>{ while(h.blade.length && now - h.blade[0].t > BLADE_MS) h.blade.shift(); });
+}
+
+// Detection loop. Inference is the single heaviest thing on the main thread, and it
+// BLOCKS the 60fps render loop while it runs — so we THROTTLE it. Detection at ~22Hz
+// plus the 60fps One-Euro interpolation looks just as smooth but leaves far more time
+// for rendering, which is what kills the lag.
+let _lastVideoTs = -1, _lastDetect = 0;
+const DETECT_INTERVAL = 45;   // ms between inferences (~22Hz)
 function startDetectLoop(){
   const run = ()=>{
-    if (handLandmarker && videoEl.readyState >= 2){
-      let ts = performance.now();
+    const now = performance.now();
+    if (handLandmarker && videoEl.readyState >= 2 && now - _lastDetect >= DETECT_INTERVAL){
+      _lastDetect = now;
+      let ts = now;
       if (ts <= _lastVideoTs) ts = _lastVideoTs + 1;   // must be strictly increasing
       _lastVideoTs = ts;
       try { onLandmarks(handLandmarker.detectForVideo(videoEl, ts)); }
@@ -995,7 +1037,7 @@ async function boot(){
   //     soon as the user clicks "Allow", independent of the model loading. ---
   try{
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal:1280 }, height: { ideal:720 }, facingMode: 'user' },
+      video: { width: { ideal:640 }, height: { ideal:480 }, frameRate: { ideal:30 }, facingMode: 'user' },
       audio: false,
     });
     videoEl.srcObject = stream;
@@ -1023,14 +1065,14 @@ async function boot(){
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
         delegate: 'GPU',
       },
-      numHands: 1,
+      numHands: 2,
       runningMode: 'VIDEO',
       minHandDetectionConfidence: 0.5,
       minHandPresenceConfidence: 0.5,
       minTrackingConfidence: 0.5,
     });
     startDetectLoop();
-    setStatus('point your index finger to slice');
+    setStatus('point your index finger(s) to slice');
   } catch(err){
     console.error('hand-tracking load error', err);
     setStatus('⚠ hand-tracking failed to load — video shows but slicing is off');
@@ -1048,18 +1090,7 @@ $('startBtn').addEventListener('click', ()=>{
   // the live video simply fades in once the camera stream is ready.
   startGame();
 });
-$('pauseBtn').addEventListener('click', pauseGame);
-$('resumeBtn').addEventListener('click', resumeGame);
-$('restartFromPause').addEventListener('click', startGame);
 $('playAgainBtn').addEventListener('click', startGame);
-
-// keyboard: P/Esc pause-toggle (mid-game only)
-window.addEventListener('keydown', (e)=>{
-  if (e.key==='p' || e.key==='P' || e.key==='Escape'){
-    if (gameState===State.PLAYING) pauseGame();
-    else if (gameState===State.PAUSED) resumeGame();
-  }
-});
 
 setStatus('press Start to enable camera');
 </script>
