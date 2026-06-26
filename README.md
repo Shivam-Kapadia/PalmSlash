@@ -1,4 +1,4 @@
-# 🥷 Fruit Ninja — but you're the blade  ·  v1.1
+# 
 
 A little Fruit Ninja clone I built that uses your **webcam and your hands** instead of a mouse or a touchscreen. Point at the screen, swipe through the fruit, and watch it split apart. No controller, no keyboard — just your hands in the air.
 
@@ -35,18 +35,6 @@ It's one single `index.html` file. That's the whole game. Open it and play.
 4. **Swipe through the fruit.** Use both hands for two blades, swipe fast for power slices, pinch for precise cuts — and dodge the bombs once they appear.
 
 Works best when the room isn't too dark and your hands aren't lost against a busy background.
-
-## Running it yourself
-
-Because it needs the camera, it has to be served over `http://localhost` or `https://` — double-clicking the file won't work (browsers block the camera on `file://`).
-
-Quickest way, if you have Node:
-
-```bash
-npx http-server -p 8000
-```
-
-Then open `http://localhost:8000`. Any tiny static server does the job.
 
 ## How it's built
 
