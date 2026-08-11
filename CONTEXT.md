@@ -13,7 +13,7 @@ fingertips become blades, and fruit falling down the screen get sliced by swipin
 them in the air. Runs entirely client-side in the browser — no server, no accounts, no
 data leaves the machine.
 
-- **Live:** https://shivam-kapadia.github.io/fruit-ninja/ (GitHub Pages, served from `main`)
+- **Live:** https://shivam-kapadia.github.io/PalmSlash/ (GitHub Pages, served from `main`)
 - **Current version:** v1.1 — two-handed play, power slices, pinch precision, difficulty ramp
 - **License:** MIT ([LICENSE](LICENSE))
 
@@ -22,7 +22,7 @@ data leaves the machine.
 ```
 index.html   the entire game — markup, CSS, and JS in one file (~1100 lines)
 README.md    player-facing docs: how to play, how to run, how it's built
-context.md   this file
+CONTEXT.md   this file
 LICENSE      MIT
 ```
 
@@ -49,7 +49,7 @@ libraries load from a CDN at runtime.
 | p5.js | 1.9.0 | `<script>` from jsDelivr | canvas, draw loop, fruit/particle/blade rendering |
 | MediaPipe Tasks Vision | 0.10.14 | dynamic `import()` from jsDelivr | `HandLandmarker` (GPU delegate), + its WASM fileset |
 | `hand_landmarker.task` | float16/1 | Google Cloud Storage | the tracking model itself (a few MB, first-load cost) |
-| Google Fonts | — | stylesheet | Hanken Grotesk + Inter |
+| Google Fonts | — | stylesheet | Press Start 2P + VT323 (the pixel UI) |
 
 All four are external. The game degrades rather than crashes: if the model fails to load
 the video still shows and fruit still fall, you just can't slice.
@@ -58,16 +58,37 @@ the video still shows and fruit still fall, you just can't slice.
 
 | Lines | Section | Notes |
 |---|---|---|
-| 1–238 | `<head>` + CSS | design tokens in `:root`, HUD, overlays, animated mesh background |
-| 240–298 | DOM | canvas mount `#wrap`, `#cam` video (hidden, texture source only), `#hud`, start/over overlays, `#status` |
-| 309–381 | Global state & tuning | game state machine, entity arrays, `FRUITS` table, `BOMB` config |
-| 393–451 | p5 sketch | `setup` / `windowResized` / `draw` — draw order lives here |
-| 465–644 | Game logic | difficulty, spawn, slice, lives, blade-vs-fruit collision |
-| 649–821 | Rendering | fruits, particles, popups, splashes, blade trails, cursors |
-| 826–864 | HUD | score/lives DOM updates and their animations |
-| 869–894 | Game flow | `startGame` / `endGame` / `setStatus` |
-| 899–1080 | Vision | coordinate mapping, One-Euro filter, pinch, landmark handling, detect loop, `boot()` |
-| 1085–1096 | Wiring | button listeners |
+| 1–357 | `<head>` + CSS | pixel design system: palette tokens in `:root`, frames, HUD, overlays, buttons |
+| 359–421 | DOM | canvas mount `#wrap`, `#cam` video (hidden, texture source only), `#hud`, start/over overlays, `#status` |
+| 425–500 | Global state & tuning | game state machine, entity arrays, `FRUITS` table, `BOMB` config |
+| 513–572 | p5 sketch | `setup` / `windowResized` / `draw` — draw order lives here |
+| 582–762 | Game logic | difficulty, spawn, slice, lives, blade-vs-fruit collision |
+| 767–941 | Rendering | fruits, particles, popups, splashes, blade trails, cursors |
+| 944–1007 | HUD | score/lives DOM updates, the pixel-heart sprite, screen-flash effects |
+| 1010–1036 | Game flow | `startGame` / `endGame` / `setStatus` |
+| 1040–1223 | Vision | coordinate mapping, One-Euro filter, pinch, landmark handling, detect loop, `boot()` |
+| 1226–1237 | Wiring | button listeners |
+
+### The pixel UI layer
+Everything outside the canvas — HUD, overlays, scoreboard, buttons — is 8-bit arcade
+chrome, and it follows three rules that are worth keeping:
+
+- **Nothing blurs.** Every frame is built from *un-blurred* `box-shadow` rings: a bright
+  bezel (`--panel-2`), then a black outline (`--ink`), over a dark well. Blur radii and
+  `backdrop-filter` are what the old theme used, and both cost the compositor real time on
+  a page that is already fighting for the main thread. Hard shadows are free and they're
+  the only way the edges stay pixel-crisp.
+- **Nothing eases.** Transitions and animations use `steps()`, so state changes snap the
+  way a sprite does. The old full-screen animated gradient mesh is gone for the same
+  reason as the blur — it repainted the whole viewport forever, for decoration.
+- **Two fonts, both bitmap.** `Press Start 2P` for anything numeric or label-like (score,
+  best, lives, buttons, titles, the in-canvas "+N" popups) and `VT323` for body copy,
+  which stays readable at paragraph length. Press Start 2P only covers ASCII — that's why
+  the `#status` strings and `#newHi` are plain ASCII rather than `…`, `⚠` or `★`, which
+  would drop to a fallback font mid-word.
+
+The camera feed, fruit, particles and blades are drawn by p5 and were deliberately left
+alone — the pixel work stops at the canvas edge.
 
 ### State machine
 `State = { START, PLAYING, PAUSED, OVER }` in `gameState`. `PAUSED` is defined but not

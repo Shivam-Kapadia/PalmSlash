@@ -51,7 +51,10 @@ Getting two-handed tracking to feel fluid took some doing:
 - I expand the reach a bit toward the screen edges so the bottom is comfortably reachable without your hand slipping out of the camera's view.
 - A touch of velocity prediction trims the perceived latency so the blade stays glued to your fingertip.
 
-The look is a neon, Discord-flavoured dark theme — deep indigo, blurple, magenta.
+The look is **8-bit arcade**: bitmap type, chunky beveled panels, hard black outlines and
+buttons that clunk down when you press them — all plain CSS, no images. The frames use
+un-blurred shadows and stepped animations on purpose, so the chrome costs the browser
+almost nothing and every cycle stays where it matters: the hand tracking.
 
 ## Heads up
 
