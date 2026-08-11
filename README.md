@@ -4,7 +4,7 @@ A little Fruit Ninja clone I built that uses your **webcam and your hands** inst
 
 It's one single `index.html` file. That's the whole game. Open it and play.
 
-**▶️ Play it here:** https://shivam-kapadia.github.io/fruit-ninja/
+**▶️ Play it here:** https://shivam-kapadia.github.io/PalmSlash/
 *(your browser will ask for camera permission — that's the whole point, say yes)*
 
 ---
