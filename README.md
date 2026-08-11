@@ -1,6 +1,6 @@
-# 
+# Palm Slash
 
-A little Fruit Ninja clone I built that uses your **webcam and your hands** instead of a mouse or a touchscreen. Point at the screen, swipe through the fruit, and watch it split apart. No controller, no keyboard — just your hands in the air.
+A little Fruit Ninja–style game I built that uses your **webcam and your hands** instead of a mouse or a touchscreen. Point at the screen, swipe through the fruit, and watch it split apart. No controller, no keyboard — just your hands in the air.
 
 It's one single `index.html` file. That's the whole game. Open it and play.
 

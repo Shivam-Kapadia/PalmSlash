@@ -1,4 +1,4 @@
-# Project Context — Neon Fruit Ninja
+# Project Context — Palm Slash
 
 Technical context for anyone (human or AI assistant) picking up this codebase. The
 [README.md](README.md) is written for players; this file is written for whoever has to
